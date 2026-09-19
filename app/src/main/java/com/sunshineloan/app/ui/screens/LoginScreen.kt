@@ -1,6 +1,8 @@
 package com.sunshineloan.app.ui.screens
 
 import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -25,6 +27,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Phone
@@ -37,6 +40,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -53,9 +57,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -63,6 +70,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sunshineloan.app.R
 import com.sunshineloan.app.firebase.AuthState
+import com.sunshineloan.app.firebase.PhoneNumberUtil
 import com.sunshineloan.app.ui.MainViewModel
 import com.sunshineloan.app.ui.theme.SunshineBorder
 import com.sunshineloan.app.ui.theme.SunshineError
@@ -75,13 +83,23 @@ import com.sunshineloan.app.ui.theme.SunshineTextSecondary
 import com.sunshineloan.app.ui.theme.SunshineWhite
 import kotlinx.coroutines.delay
 
+private fun Context.findActivity(): Activity? {
+    var ctx = this
+    while (ctx is ContextWrapper) {
+        if (ctx is Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    return null
+}
+
 @Composable
 fun LoginScreen(
     viewModel: MainViewModel,
     onLoginSuccess: () -> Unit
 ) {
     val context = LocalContext.current
-    val activity = context as? Activity
+    val activity = remember(context) { context.findActivity() }
+    val clipboardManager = LocalClipboardManager.current
     val authState by viewModel.authState.collectAsState()
 
     var mobileNumber by remember { mutableStateOf("") }
@@ -90,6 +108,8 @@ fun LoginScreen(
     var otpCode by remember { mutableStateOf("") }
     var cooldownSeconds by remember { mutableIntStateOf(0) }
     var localError by remember { mutableStateOf<String?>(null) }
+    var showFirebaseDetails by remember { mutableStateOf(false) }
+    var shaCopiedNotice by remember { mutableStateOf(false) }
 
     val countryCodes = listOf(
         "+91" to "India (+91)",
@@ -109,10 +129,20 @@ fun LoginScreen(
         }
     }
 
-    // Auto navigate on authentication
+    // React to Firebase Auth state transitions
     LaunchedEffect(authState) {
-        if (authState is AuthState.Authenticated) {
-            onLoginSuccess()
+        when (authState) {
+            is AuthState.Authenticated -> {
+                onLoginSuccess()
+            }
+            is AuthState.CodeSent -> {
+                cooldownSeconds = 60
+                localError = null
+            }
+            is AuthState.Error -> {
+                cooldownSeconds = 0
+            }
+            else -> {}
         }
     }
 
@@ -303,18 +333,20 @@ fun LoginScreen(
                 // Get OTP Button
                 Button(
                     onClick = {
-                        if (mobileNumber.length < 6) {
-                            localError = "Please enter a valid phone number"
+                        val formatResult = PhoneNumberUtil.format(selectedCountryCode, mobileNumber)
+                        if (formatResult.formattedNumber == null) {
+                            localError = formatResult.errorMessage
+                            return@Button
+                        }
+                        val targetActivity = activity ?: context.findActivity()
+                        if (targetActivity == null) {
+                            localError = "Cannot initiate verification: Activity context unavailable."
                             return@Button
                         }
                         localError = null
-                        val fullPhone = "$selectedCountryCode$mobileNumber"
-                        if (activity != null) {
-                            cooldownSeconds = 60
-                            viewModel.sendOtp(fullPhone, activity, resendToken)
-                        }
+                        viewModel.sendOtp(formatResult.formattedNumber, targetActivity, resendToken)
                     },
-                    enabled = mobileNumber.length >= 6 && cooldownSeconds == 0 && !isLoading,
+                    enabled = mobileNumber.isNotBlank() && cooldownSeconds == 0 && !isLoading,
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = SunshineOrangePrimary,
@@ -397,18 +429,17 @@ fun LoginScreen(
                 Button(
                     onClick = {
                         if (otpCode.length != 6) {
-                            localError = "Please enter the 6-digit OTP"
+                            localError = "Please enter the complete 6-digit OTP"
+                            return@Button
+                        }
+                        if (verificationId.isBlank()) {
+                            localError = "Please tap 'Get OTP' first to send a verification code to your phone."
                             return@Button
                         }
                         localError = null
-                        if (verificationId.isNotBlank()) {
-                            viewModel.verifyOtp(verificationId, otpCode)
-                        } else {
-                            // If running in development without Firebase config
-                            onLoginSuccess()
-                        }
+                        viewModel.verifyOtp(verificationId, otpCode)
                     },
-                    enabled = otpCode.length == 6 && !isLoading,
+                    enabled = otpCode.length == 6 && !isLoading && verificationId.isNotBlank(),
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = SunshineOrangePrimary,
@@ -446,21 +477,133 @@ fun LoginScreen(
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(verticalAlignment = Alignment.Top) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = "Error",
+                            tint = SunshineError,
+                            modifier = Modifier.size(20.dp).padding(top = 2.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = errorToShow,
+                            color = SunshineError,
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Firebase Setup & SHA-1 Helper
+        Card(
+            colors = CardDefaults.cardColors(containerColor = SunshineOrangeContainer),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { showFirebaseDetails = !showFirebaseDetails }
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
                 Row(
-                    modifier = Modifier.padding(12.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Warning,
-                        contentDescription = "Error",
-                        tint = SunshineError,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = "Firebase Info",
+                            tint = SunshineOrangeDark,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Firebase SHA-1 & Auth Setup Guide",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            color = SunshineOrangeDark
+                        )
+                    }
                     Text(
-                        text = errorToShow,
-                        color = SunshineError,
-                        fontSize = 13.sp
+                        text = if (showFirebaseDetails) "Hide" else "Show",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = SunshineOrangeDark
+                    )
+                }
+
+                if (showFirebaseDetails) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "For OTP delivery to succeed, Firebase requires your app's SHA-1 fingerprint in the Firebase Console:\n" +
+                               "1. Go to Firebase Console -> sunshine-loan-b8296\n" +
+                               "2. Project Settings -> Your Apps -> Android (com.sunshineloan.app)\n" +
+                               "3. Add the following SHA-1 fingerprint:",
+                        fontSize = 12.sp,
+                        color = SunshineTextPrimary,
+                        lineHeight = 16.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = SunshineWhite),
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "49:15:46:5B:C2:86:21:F7:0D:7B:98:80:64:18:EE:D4:1E:98:F3:4E",
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 11.sp,
+                                color = SunshineTextPrimary,
+                                modifier = Modifier.weight(1f)
+                            )
+                            IconButton(
+                                onClick = {
+                                    clipboardManager.setText(
+                                        AnnotatedString("49:15:46:5B:C2:86:21:F7:0D:7B:98:80:64:18:EE:D4:1E:98:F3:4E")
+                                    )
+                                    shaCopiedNotice = true
+                                },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ContentCopy,
+                                    contentDescription = "Copy SHA-1",
+                                    tint = SunshineOrangeDark,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    if (shaCopiedNotice) {
+                        Text(
+                            text = "Copied SHA-1 to clipboard!",
+                            fontSize = 11.sp,
+                            color = SunshineOrangeDark,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Tip: In Firebase Console -> Authentication -> Sign-in method -> Phone, add a test phone number (e.g. +91 9999999999 with code 123456) for instant testing.",
+                        fontSize = 11.sp,
+                        color = SunshineTextSecondary,
+                        lineHeight = 15.sp
                     )
                 }
             }

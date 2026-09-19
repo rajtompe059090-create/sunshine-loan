@@ -48,6 +48,8 @@ class AuthRepository(private val context: Context) {
 
     fun isUserLoggedIn(): Boolean = auth?.currentUser != null
 
+    private var storedResendToken: PhoneAuthProvider.ForceResendingToken? = null
+
     fun getUserId(): String {
         return auth?.currentUser?.uid ?: "local_guest_user"
     }
@@ -62,7 +64,7 @@ class AuthRepository(private val context: Context) {
     ) {
         if (auth == null) {
             _authState.value = AuthState.Error(
-                "Firebase is not configured. Please add 'app/google-services.json' to enable Firebase Phone Auth."
+                "Firebase is not initialized. Please verify that 'app/google-services.json' is present."
             )
             return
         }
@@ -71,18 +73,21 @@ class AuthRepository(private val context: Context) {
 
         val callbacks = object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
             override fun onVerificationCompleted(credential: PhoneAuthCredential) {
-                // Instant verification or auto-retrieval
+                // Instant SMS auto-retrieval
                 signInWithCredential(credential)
             }
 
             override fun onVerificationFailed(e: FirebaseException) {
-                _authState.value = AuthState.Error(e.localizedMessage ?: "Verification failed. Please check phone number.")
+                android.util.Log.e("AuthRepository", "Firebase Phone Auth verification failed", e)
+                val friendlyMessage = parseFirebaseError(e)
+                _authState.value = AuthState.Error(friendlyMessage)
             }
 
             override fun onCodeSent(
                 verificationId: String,
                 token: PhoneAuthProvider.ForceResendingToken
             ) {
+                storedResendToken = token
                 _authState.value = AuthState.CodeSent(
                     verificationId = verificationId,
                     token = token,
@@ -97,11 +102,54 @@ class AuthRepository(private val context: Context) {
             .setActivity(activity)
             .setCallbacks(callbacks)
 
-        if (resendToken != null) {
-            builder.setForceResendingToken(resendToken)
+        val tokenToUse = resendToken ?: storedResendToken
+        if (tokenToUse != null) {
+            builder.setForceResendingToken(tokenToUse)
         }
 
         PhoneAuthProvider.verifyPhoneNumber(builder.build())
+    }
+
+    /**
+     * Parses Firebase Auth exceptions into explicit, user-actionable explanations.
+     */
+    private fun parseFirebaseError(e: FirebaseException): String {
+        val raw = e.localizedMessage ?: e.message ?: "Authentication failed"
+
+        return when {
+            raw.contains("not authorized", ignoreCase = true) ||
+            raw.contains("app verification", ignoreCase = true) ||
+            raw.contains("SHA-1", ignoreCase = true) ||
+            raw.contains("Play Integrity", ignoreCase = true) ||
+            raw.contains("SafetyNet", ignoreCase = true) -> {
+                "Firebase App Verification Failed (SHA-1 Required):\n" +
+                "Firebase rejected the OTP request because the debug SHA-1 certificate is missing in the Firebase Console.\n\n" +
+                "• Package: com.sunshineloan.app\n" +
+                "• Debug SHA-1: 49:15:46:5B:C2:86:21:F7:0D:7B:98:80:64:18:EE:D4:1E:98:F3:4E\n" +
+                "• Debug SHA-256: DF:54:F6:05:57:3E:8C:0B:29:D5:B9:06:7C:AC:0C:A4:AD:CF:A7:67:B7:64:3F:1F:6A:93:3F:F3:55:3B:B2:F1\n\n" +
+                "Add this SHA-1 in Firebase Console (Project Settings -> Your Apps -> Android -> Add Fingerprint)."
+            }
+            raw.contains("format", ignoreCase = true) || raw.contains("invalid phone", ignoreCase = true) -> {
+                "Invalid Phone Number Format: The phone number was rejected by Firebase. Must be in E.164 format (+91XXXXXXXXXX)."
+            }
+            raw.contains("blocked all requests", ignoreCase = true) ||
+            raw.contains("unusual activity", ignoreCase = true) ||
+            raw.contains("Too many requests", ignoreCase = true) -> {
+                "Firebase SMS Requests Blocked: Firebase has temporarily throttled SMS requests for this device/project. Please wait a few minutes, or use a Firebase Test Phone Number."
+            }
+            raw.contains("quota", ignoreCase = true) -> {
+                "Firebase SMS Quota Exceeded: The daily SMS limit for your Firebase project has been reached."
+            }
+            raw.contains("disabled", ignoreCase = true) || raw.contains("sign-in provider is disabled", ignoreCase = true) -> {
+                "Phone Auth Disabled: Phone Authentication is not enabled in Firebase Console (Authentication -> Sign-in method -> Phone)."
+            }
+            raw.contains("network", ignoreCase = true) || raw.contains("timeout", ignoreCase = true) -> {
+                "Network Error: Unable to reach Firebase servers. Please verify your internet connection."
+            }
+            else -> {
+                "Firebase Error: $raw"
+            }
+        }
     }
 
     /**
@@ -109,17 +157,39 @@ class AuthRepository(private val context: Context) {
      */
     suspend fun verifyOtp(verificationId: String, code: String): Result<FirebaseUser?> {
         if (auth == null) {
-            return Result.failure(
-                IllegalStateException("Firebase is not configured. Missing google-services.json at app/google-services.json")
-            )
+            val err = "Firebase is not configured. Missing google-services.json."
+            _authState.value = AuthState.Error(err)
+            return Result.failure(IllegalStateException(err))
         }
+        if (verificationId.isBlank()) {
+            val err = "No active OTP verification session. Please tap 'Get OTP' first."
+            _authState.value = AuthState.Error(err)
+            return Result.failure(IllegalStateException(err))
+        }
+        if (code.length != 6) {
+            val err = "Please enter the full 6-digit OTP code."
+            _authState.value = AuthState.Error(err)
+            return Result.failure(IllegalArgumentException(err))
+        }
+
         return try {
+            _authState.value = AuthState.Loading
             val credential = PhoneAuthProvider.getCredential(verificationId, code)
             val authResult = auth.signInWithCredential(credential).await()
             _authState.value = AuthState.Authenticated(authResult.user)
             Result.success(authResult.user)
         } catch (e: Exception) {
-            _authState.value = AuthState.Error(e.localizedMessage ?: "Invalid OTP code entered.")
+            val msg = if (e is FirebaseException) {
+                if (e.message?.contains("invalid", ignoreCase = true) == true ||
+                    e.message?.contains("code", ignoreCase = true) == true) {
+                    "Invalid OTP: The 6-digit code entered is incorrect or expired. Please check and re-enter, or tap Resend OTP."
+                } else {
+                    parseFirebaseError(e)
+                }
+            } else {
+                e.localizedMessage ?: "Failed to verify OTP code."
+            }
+            _authState.value = AuthState.Error(msg)
             Result.failure(e)
         }
     }

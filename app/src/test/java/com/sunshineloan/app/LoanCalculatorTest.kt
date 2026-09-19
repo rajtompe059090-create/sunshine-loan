@@ -77,11 +77,11 @@ class LoanCalculatorTest {
 
     @Test
     fun testCurrencyFormatting() {
-        val usdFormatted = calculator.formatCurrency(120000.0, "USD")
-        assertTrue(usdFormatted.contains("$"))
-        assertTrue(usdFormatted.contains("120,000"))
+        val inrFormatted = calculator.formatCurrency(120000.0)
+        assertTrue("Must contain Rupee symbol", inrFormatted.contains("₹"))
+        assertTrue("Must follow Indian grouping (1,20,000)", inrFormatted.contains("1,20,000"))
 
-        val inrFormatted = calculator.formatCurrency(120000.0, "INR")
-        assertTrue(inrFormatted.contains("₹"))
+        val lakhFormatted = calculator.formatCurrency(100000.0)
+        assertTrue("Must format 1 Lakh as 1,00,000", lakhFormatted.contains("1,00,000"))
     }
 }

@@ -100,7 +100,7 @@ fun LoanCalculatorScreen(
         }
     }
 
-    val currencyPrefix = if (currencyCode.equals("INR", ignoreCase = true)) "₹" else "$"
+    val currencyPrefix = "₹"
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },

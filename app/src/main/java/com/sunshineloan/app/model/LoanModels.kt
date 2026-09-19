@@ -31,7 +31,7 @@ data class LoanRecord(
     val netLoanCost: Double = 0.0,
     val timestamp: Long = System.currentTimeMillis(),
     val formattedDate: String = "",
-    val currencyCode: String = "USD"
+    val currencyCode: String = "INR"
 ) {
     fun toMap(): Map<String, Any> {
         return mapOf(
@@ -64,7 +64,7 @@ data class LoanRecord(
                 netLoanCost = (map["netLoanCost"] as? Number)?.toDouble() ?: 0.0,
                 timestamp = (map["timestamp"] as? Number)?.toLong() ?: System.currentTimeMillis(),
                 formattedDate = (map["formattedDate"] as? String).orEmpty(),
-                currencyCode = (map["currencyCode"] as? String) ?: "USD"
+                currencyCode = (map["currencyCode"] as? String) ?: "INR"
             )
         }
     }

@@ -90,21 +90,35 @@ class LoanCalculator {
     }
 
     /**
-     * Formats currency according to user currency selection (USD or INR).
+     * Formats currency as Indian Rupees (₹ - INR) using standard Indian number formatting (e.g. ₹1,00,000.00).
      */
-    fun formatCurrency(amount: Double, currencyCode: String = "USD"): String {
+    fun formatCurrency(amount: Double, currencyCode: String = "INR"): String {
         return try {
-            val symbol = if (currencyCode.equals("INR", ignoreCase = true)) "₹" else "$"
-            val formatter = NumberFormat.getNumberInstance(
-                if (currencyCode.equals("INR", ignoreCase = true)) Locale("en", "IN") else Locale.US
-            ).apply {
-                minimumFractionDigits = 2
-                maximumFractionDigits = 2
+            val isNegative = amount < 0
+            val absAmount = kotlin.math.abs(amount)
+            val intPart = absAmount.toLong()
+            val fracPart = kotlin.math.round((absAmount - intPart) * 100).toLong()
+            val fracString = String.format(Locale.ROOT, "%02d", fracPart.coerceIn(0, 99))
+
+            val intStr = intPart.toString()
+            val formattedInt = if (intStr.length <= 3) {
+                intStr
+            } else {
+                val lastThree = intStr.substring(intStr.length - 3)
+                val rest = intStr.substring(0, intStr.length - 3)
+                val parts = mutableListOf<String>()
+                var idx = rest.length
+                while (idx > 0) {
+                    val start = (idx - 2).coerceAtLeast(0)
+                    parts.add(0, rest.substring(start, idx))
+                    idx = start
+                }
+                parts.joinToString(",") + "," + lastThree
             }
-            "$symbol${formatter.format(amount)}"
+            val prefix = if (isNegative) "-₹" else "₹"
+            "$prefix$formattedInt.$fracString"
         } catch (_: Exception) {
-            val prefix = if (currencyCode.equals("INR", ignoreCase = true)) "₹" else "$"
-            "$prefix%.2f".format(amount)
+            "₹%.2f".format(amount)
         }
     }
 

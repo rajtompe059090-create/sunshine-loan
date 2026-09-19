@@ -183,8 +183,8 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp)
         ) {
-            // Section 1: Currency Selection
-            SectionHeader(title = "Currency Selection", icon = Icons.Default.AttachMoney)
+            // Section 1: Currency Standard
+            SectionHeader(title = "App Currency", icon = Icons.Default.AttachMoney)
 
             Card(
                 colors = CardDefaults.cardColors(containerColor = SunshineWhite),
@@ -196,40 +196,18 @@ fun SettingsScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { viewModel.preferences.setCurrency("USD") }
                             .padding(vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         RadioButton(
-                            selected = currencyCode.equals("USD", ignoreCase = true),
-                            onClick = { viewModel.preferences.setCurrency("USD") },
-                            colors = RadioButtonDefaults.colors(selectedColor = SunshineOrangePrimary)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            Text("USD ($)", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                            Text("United States Dollar (Default)", fontSize = 12.sp, color = SunshineTextSecondary)
-                        }
-                    }
-
-                    HorizontalDivider(color = SunshineBorder, thickness = 0.5.dp)
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { viewModel.preferences.setCurrency("INR") }
-                            .padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(
-                            selected = currencyCode.equals("INR", ignoreCase = true),
-                            onClick = { viewModel.preferences.setCurrency("INR") },
+                            selected = true,
+                            onClick = null,
                             colors = RadioButtonDefaults.colors(selectedColor = SunshineOrangePrimary)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Column {
                             Text("INR (₹)", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                            Text("Indian Rupee", fontSize = 12.sp, color = SunshineTextSecondary)
+                            Text("Indian Rupee — Standard Application Currency", fontSize = 12.sp, color = SunshineTextSecondary)
                         }
                     }
                 }

@@ -15,7 +15,7 @@ class UserPreferences(context: Context) {
         context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     private val _currencyCode = MutableStateFlow(
-        prefs.getString(KEY_CURRENCY, "USD") ?: "USD"
+        prefs.getString(KEY_CURRENCY, "INR") ?: "INR"
     )
     val currencyCode: StateFlow<String> = _currencyCode.asStateFlow()
 
@@ -30,7 +30,7 @@ class UserPreferences(context: Context) {
     val guarantyRate: StateFlow<Double> = _guarantyRate.asStateFlow()
 
     fun setCurrency(currency: String) {
-        val valid = if (currency.equals("INR", ignoreCase = true)) "INR" else "USD"
+        val valid = "INR"
         prefs.edit().putString(KEY_CURRENCY, valid).apply()
         _currencyCode.value = valid
     }
@@ -50,7 +50,7 @@ class UserPreferences(context: Context) {
     fun resetToDefaults() {
         setFundingFeeRate(2.15)
         setGuarantyRate(25.0)
-        setCurrency("USD")
+        setCurrency("INR")
     }
 
     companion object {
