@@ -23,14 +23,41 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Set up Android SDK and accept licenses
+        run: |
+          ANDROID_SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          SDKMANAGER="${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER=$(which sdkmanager 2>/dev/null || echo "")
+          fi
+
+          if [ -n "$SDKMANAGER" ] && [ -x "$SDKMANAGER" ]; then
+            echo "Accepting Android SDK licenses..."
+            yes | "$SDKMANAGER" --licenses || true
+            echo "Installing required SDK packages..."
+            "$SDKMANAGER" --install "platform-tools" "platforms;android-35" || true
+          fi
+
+      - name: Ensure debug keystore exists
+        run: |
+          if [ ! -f debug.keystore ]; then
+            echo "Creating debug.keystore for assembleDebug signing..."
+            keytool -genkeypair -v -keystore debug.keystore -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android -dname "CN=Android Debug,O=Android,C=US"
+          fi
 
       - name: Make Gradle wrapper executable
         run: chmod +x gradlew
 
       - name: Run Gradle assembleDebug
         run: ./gradlew :app:assembleDebug --stacktrace
+
+      - name: Verify APK exists
+        run: |
+          if [ ! -f app/build/outputs/apk/debug/app-debug.apk ]; then
+            echo "::error::app-debug.apk not found at app/build/outputs/apk/debug/app-debug.apk"
+            exit 1
+          fi
+          echo "Found app-debug.apk successfully."
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
