@@ -31,11 +31,12 @@ sealed class AuthState {
 
 class AuthRepository(private val context: Context) {
 
-    private val auth: FirebaseAuth? = FirebaseHelper.getAuth(context)
+    private val auth: FirebaseAuth?
+        get() = FirebaseHelper.getAuth(context)
 
     private val _authState = MutableStateFlow<AuthState>(
-        if (auth?.currentUser != null) {
-            AuthState.Authenticated(auth.currentUser)
+        if (FirebaseHelper.getAuth(context)?.currentUser != null) {
+            AuthState.Authenticated(FirebaseHelper.getAuth(context)?.currentUser)
         } else {
             AuthState.Idle
         }
@@ -62,7 +63,8 @@ class AuthRepository(private val context: Context) {
         activity: Activity,
         resendToken: PhoneAuthProvider.ForceResendingToken? = null
     ) {
-        if (auth == null) {
+        val currentAuth = auth
+        if (currentAuth == null) {
             _authState.value = AuthState.Error(
                 "Firebase is not initialized. Please verify that 'app/google-services.json' is present."
             )
@@ -96,7 +98,7 @@ class AuthRepository(private val context: Context) {
             }
         }
 
-        val builder = PhoneAuthOptions.newBuilder(auth)
+        val builder = PhoneAuthOptions.newBuilder(currentAuth)
             .setPhoneNumber(phoneNumber)
             .setTimeout(60L, TimeUnit.SECONDS)
             .setActivity(activity)
@@ -174,8 +176,9 @@ class AuthRepository(private val context: Context) {
 
         return try {
             _authState.value = AuthState.Loading
+            val currentAuth = auth ?: throw IllegalStateException("Firebase is not initialized.")
             val credential = PhoneAuthProvider.getCredential(verificationId, code)
-            val authResult = auth.signInWithCredential(credential).await()
+            val authResult = currentAuth.signInWithCredential(credential).await()
             _authState.value = AuthState.Authenticated(authResult.user)
             Result.success(authResult.user)
         } catch (e: Exception) {
@@ -214,8 +217,9 @@ class AuthRepository(private val context: Context) {
     }
 
     fun resetState() {
-        if (auth?.currentUser != null) {
-            _authState.value = AuthState.Authenticated(auth.currentUser)
+        val user = auth?.currentUser
+        if (user != null) {
+            _authState.value = AuthState.Authenticated(user)
         } else {
             _authState.value = AuthState.Idle
         }

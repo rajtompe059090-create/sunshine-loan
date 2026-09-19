@@ -39,7 +39,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // Auth & Firebase State
     val authState: StateFlow<AuthState> = authRepo.authState
-    val isFirebaseConfigured: Boolean = authRepo.isFirebaseConfigured()
+    val isFirebaseConfigured: Boolean
+        get() = authRepo.isFirebaseConfigured()
 
     // Inputs
     val loanAmountInput = MutableStateFlow("120000")

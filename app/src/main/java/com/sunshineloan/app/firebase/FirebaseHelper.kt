@@ -13,6 +13,10 @@ object FirebaseHelper {
 
     fun isConfigured(context: Context): Boolean {
         return try {
+            if (FirebaseApp.getApps(context).isEmpty()) {
+                // Initialize default FirebaseApp using google-services generated resources if not already done
+                FirebaseApp.initializeApp(context)
+            }
             FirebaseApp.getApps(context).isNotEmpty()
         } catch (_: Exception) {
             false

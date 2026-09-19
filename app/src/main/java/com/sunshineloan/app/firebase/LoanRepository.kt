@@ -14,7 +14,8 @@ import java.util.UUID
 
 class LoanRepository(private val context: Context) {
 
-    private val firestore: FirebaseFirestore? = FirebaseHelper.getFirestore(context)
+    private val firestore: FirebaseFirestore?
+        get() = FirebaseHelper.getFirestore(context)
     
     // In-memory cache & fallback for offline/pre-configured states
     private val localFallbackRecords = MutableStateFlow<List<LoanRecord>>(emptyList())
@@ -29,9 +30,10 @@ class LoanRepository(private val context: Context) {
         // Always update local fallback
         localFallbackRecords.value = listOf(recordToSave) + localFallbackRecords.value.filter { it.id != recordId }
 
-        if (firestore != null && userId.isNotBlank()) {
+        val currentFirestore = firestore
+        if (currentFirestore != null && userId.isNotBlank()) {
             return try {
-                firestore.collection("users")
+                currentFirestore.collection("users")
                     .document(userId)
                     .collection("loanRecords")
                     .document(recordId)
@@ -50,12 +52,13 @@ class LoanRepository(private val context: Context) {
      * Observes real-time loan records for the specified user ID.
      */
     fun getLoanRecordsFlow(userId: String): Flow<List<LoanRecord>> {
-        if (firestore == null || userId.isBlank()) {
+        val currentFirestore = firestore
+        if (currentFirestore == null || userId.isBlank()) {
             return localFallbackRecords.asStateFlow()
         }
 
         return callbackFlow {
-            val registration = firestore.collection("users")
+            val registration = currentFirestore.collection("users")
                 .document(userId)
                 .collection("loanRecords")
                 .orderBy("timestamp", Query.Direction.DESCENDING)
@@ -86,9 +89,10 @@ class LoanRepository(private val context: Context) {
         // Remove from local fallback
         localFallbackRecords.value = localFallbackRecords.value.filter { it.id != recordId }
 
-        if (firestore != null && userId.isNotBlank()) {
+        val currentFirestore = firestore
+        if (currentFirestore != null && userId.isNotBlank()) {
             return try {
-                firestore.collection("users")
+                currentFirestore.collection("users")
                     .document(userId)
                     .collection("loanRecords")
                     .document(recordId)
