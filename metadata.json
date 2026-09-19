@@ -1,0 +1,8 @@
+{
+  "name": "Sunshine Loan",
+  "description": "Sunshine Loan VA Loan Calculator with Firebase Authentication, real-time amortizing calculations, historical records, and settings.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
