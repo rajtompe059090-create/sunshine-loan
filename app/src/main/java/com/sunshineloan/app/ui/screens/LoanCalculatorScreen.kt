@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
@@ -74,6 +75,7 @@ import com.sunshineloan.app.ui.theme.SunshineWhite
 @Composable
 fun LoanCalculatorScreen(
     viewModel: MainViewModel,
+    onNavigateBack: (() -> Unit)? = null,
     onNavigateToHistory: () -> Unit,
     onNavigateToSettings: () -> Unit
 ) {
@@ -108,11 +110,22 @@ fun LoanCalculatorScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = "Sunshine Loan: VA Loan Calc",
+                        text = "Loan Calculator",
                         fontWeight = FontWeight.Bold,
                         fontSize = 18.sp,
                         color = SunshineWhite
                     )
+                },
+                navigationIcon = {
+                    if (onNavigateBack != null) {
+                        IconButton(onClick = onNavigateBack, modifier = Modifier.testTag("calc_back_btn")) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                tint = SunshineWhite
+                            )
+                        }
+                    }
                 },
                 actions = {
                     IconButton(

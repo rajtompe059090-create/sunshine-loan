@@ -1,6 +1,6 @@
 {
   "name": "Sunshine Loan",
-  "description": "Sunshine Loan VA Loan Calculator with Firebase Authentication, real-time amortizing calculations, historical records, and settings.",
+  "description": "Modern Indian loan app dashboard with step-by-step loan applications, real-time EMI calculations, application status tracking, and Firebase Authentication.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

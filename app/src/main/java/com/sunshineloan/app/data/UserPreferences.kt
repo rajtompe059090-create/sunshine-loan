@@ -29,6 +29,39 @@ class UserPreferences(context: Context) {
     )
     val guarantyRate: StateFlow<Double> = _guarantyRate.asStateFlow()
 
+    private val _cachedUserName = MutableStateFlow(
+        prefs.getString(KEY_USER_NAME, "Valued Customer") ?: "Valued Customer"
+    )
+    val cachedUserName: StateFlow<String> = _cachedUserName.asStateFlow()
+
+    private val _cachedEmail = MutableStateFlow(
+        prefs.getString(KEY_USER_EMAIL, "") ?: ""
+    )
+    val cachedEmail: StateFlow<String> = _cachedEmail.asStateFlow()
+
+    private val _activeApplicationId = MutableStateFlow(
+        prefs.getString(KEY_ACTIVE_APP_ID, "") ?: ""
+    )
+    val activeApplicationId: StateFlow<String> = _activeApplicationId.asStateFlow()
+
+    fun setUserName(name: String) {
+        val trimmed = name.trim()
+        val toSave = if (trimmed.isNotBlank()) trimmed else "Valued Customer"
+        prefs.edit().putString(KEY_USER_NAME, toSave).apply()
+        _cachedUserName.value = toSave
+    }
+
+    fun setUserEmail(email: String) {
+        val trimmed = email.trim()
+        prefs.edit().putString(KEY_USER_EMAIL, trimmed).apply()
+        _cachedEmail.value = trimmed
+    }
+
+    fun setActiveApplicationId(appId: String) {
+        prefs.edit().putString(KEY_ACTIVE_APP_ID, appId).apply()
+        _activeApplicationId.value = appId
+    }
+
     fun setCurrency(currency: String) {
         val valid = "INR"
         prefs.edit().putString(KEY_CURRENCY, valid).apply()
@@ -58,6 +91,9 @@ class UserPreferences(context: Context) {
         private const val KEY_CURRENCY = "currency_code"
         private const val KEY_FUNDING_FEE_RATE = "funding_fee_rate"
         private const val KEY_GUARANTY_RATE = "guaranty_rate"
+        private const val KEY_USER_NAME = "user_full_name"
+        private const val KEY_USER_EMAIL = "user_email"
+        private const val KEY_ACTIVE_APP_ID = "active_application_id"
 
         @Volatile
         private var INSTANCE: UserPreferences? = null
