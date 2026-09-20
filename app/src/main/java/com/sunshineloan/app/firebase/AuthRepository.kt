@@ -65,8 +65,10 @@ class AuthRepository(private val context: Context) {
     ) {
         val currentAuth = auth
         if (currentAuth == null) {
+            val ex = FirebaseHelper.getLastInitException()
+            val exMsg = ex?.message ?: ex?.javaClass?.simpleName ?: "FirebaseApp initialization failed"
             _authState.value = AuthState.Error(
-                "Firebase is not initialized. Please verify that 'app/google-services.json' is present."
+                "Firebase is not initialized ($exMsg). Please verify that 'app/google-services.json' is present."
             )
             return
         }

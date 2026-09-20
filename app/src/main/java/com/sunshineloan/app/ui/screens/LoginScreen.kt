@@ -110,6 +110,10 @@ fun LoginScreen(
     var localError by remember { mutableStateOf<String?>(null) }
     var showFirebaseDetails by remember { mutableStateOf(false) }
     var shaCopiedNotice by remember { mutableStateOf(false) }
+    var isConfigured by remember { mutableStateOf(viewModel.isFirebaseConfigured) }
+    LaunchedEffect(Unit) {
+        isConfigured = viewModel.isFirebaseConfigured
+    }
 
     val countryCodes = listOf(
         "+91" to "India (+91)",
@@ -131,6 +135,7 @@ fun LoginScreen(
 
     // React to Firebase Auth state transitions
     LaunchedEffect(authState) {
+        isConfigured = viewModel.isFirebaseConfigured
         when (authState) {
             is AuthState.Authenticated -> {
                 onLoginSuccess()
@@ -199,7 +204,7 @@ fun LoginScreen(
         )
 
         // Firebase Configuration notice if google-services.json not found
-        if (!viewModel.isFirebaseConfigured) {
+        if (!isConfigured) {
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1)),
                 shape = RoundedCornerShape(12.dp),
