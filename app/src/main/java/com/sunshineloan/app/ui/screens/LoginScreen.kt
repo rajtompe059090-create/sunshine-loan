@@ -3,6 +3,9 @@ package com.sunshineloan.app.ui.screens
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -26,11 +29,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -45,6 +49,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -68,6 +73,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.google.firebase.auth.PhoneAuthProvider
 import com.sunshineloan.app.R
 import com.sunshineloan.app.firebase.AuthState
 import com.sunshineloan.app.firebase.PhoneNumberUtil
@@ -92,6 +98,9 @@ private fun Context.findActivity(): Activity? {
     return null
 }
 
+private const val DEBUG_SHA1_FINGERPRINT = "49:15:46:5B:C2:86:21:F7:0D:7B:98:80:64:18:EE:D4:1E:98:F3:4E"
+private const val DEBUG_SHA256_FINGERPRINT = "DF:54:F6:05:57:3E:8C:0B:29:D5:B9:06:7C:AC:0C:A4:AD:CF:A7:67:B7:64:3F:1F:6A:93:3F:F3:55:3B:B2:F1"
+
 @Composable
 fun LoginScreen(
     viewModel: MainViewModel,
@@ -105,56 +114,70 @@ fun LoginScreen(
     var mobileNumber by remember { mutableStateOf("") }
     var selectedCountryCode by remember { mutableStateOf("+91") }
     var countryMenuExpanded by remember { mutableStateOf(false) }
+
     var otpCode by remember { mutableStateOf("") }
+    var storedVerificationId by remember { mutableStateOf<String?>(null) }
+    var storedResendToken by remember { mutableStateOf<PhoneAuthProvider.ForceResendingToken?>(null) }
+    var verifiedPhoneNumber by remember { mutableStateOf<String?>(null) }
+
     var cooldownSeconds by remember { mutableIntStateOf(0) }
+    var timerTrigger by remember { mutableIntStateOf(0) }
+
     var localError by remember { mutableStateOf<String?>(null) }
     var showFirebaseDetails by remember { mutableStateOf(false) }
     var shaCopiedNotice by remember { mutableStateOf(false) }
-    var isConfigured by remember { mutableStateOf(viewModel.isFirebaseConfigured) }
-    LaunchedEffect(Unit) {
-        isConfigured = viewModel.isFirebaseConfigured
+
+    val countryCodes = remember {
+        listOf(
+            "+91" to "India (+91)",
+            "+1" to "USA / Canada (+1)",
+            "+44" to "UK (+44)",
+            "+61" to "Australia (+61)",
+            "+81" to "Japan (+81)",
+            "+65" to "Singapore (+65)",
+            "+971" to "UAE (+971)"
+        )
     }
 
-    val countryCodes = listOf(
-        "+91" to "India (+91)",
-        "+1" to "USA / Canada (+1)",
-        "+44" to "UK (+44)",
-        "+61" to "Australia (+61)",
-        "+81" to "Japan (+81)",
-        "+65" to "Singapore (+65)",
-        "+971" to "UAE (+971)"
-    )
-
-    // Cooldown countdown timer
-    LaunchedEffect(cooldownSeconds) {
-        if (cooldownSeconds > 0) {
-            delay(1000L)
-            cooldownSeconds -= 1
+    // 60-Second non-blocking countdown loop
+    LaunchedEffect(timerTrigger) {
+        if (timerTrigger > 0 && cooldownSeconds > 0) {
+            while (cooldownSeconds > 0) {
+                delay(1000L)
+                cooldownSeconds -= 1
+            }
         }
     }
 
     // React to Firebase Auth state transitions
     LaunchedEffect(authState) {
-        isConfigured = viewModel.isFirebaseConfigured
-        when (authState) {
+        when (val state = authState) {
             is AuthState.Authenticated -> {
                 onLoginSuccess()
             }
             is AuthState.CodeSent -> {
+                storedVerificationId = state.verificationId
+                storedResendToken = state.token
+                verifiedPhoneNumber = state.phoneNumber
                 cooldownSeconds = 60
+                timerTrigger += 1
                 localError = null
             }
             is AuthState.Error -> {
-                cooldownSeconds = 0
+                localError = state.message
+                // If error happened while sending code (and no code was ever sent), stay on phone card
+                if (storedVerificationId == null) {
+                    cooldownSeconds = 0
+                }
             }
             else -> {}
         }
     }
 
-    val isCodeSent = authState is AuthState.CodeSent
-    val verificationId = (authState as? AuthState.CodeSent)?.verificationId ?: ""
-    val resendToken = (authState as? AuthState.CodeSent)?.token
+    val isCodeSent = storedVerificationId != null
     val isLoading = authState is AuthState.Loading
+    val isShaError = localError?.contains("SHA-1", ignoreCase = true) == true ||
+            (authState as? AuthState.Error)?.message?.contains("SHA-1", ignoreCase = true) == true
 
     Column(
         modifier = Modifier
@@ -162,16 +185,16 @@ fun LoginScreen(
             .background(SunshineWhite)
             .imePadding()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp, vertical = 32.dp),
+            .padding(horizontal = 24.dp, vertical = 28.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        verticalArrangement = Arrangement.Top
     ) {
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
         // Sunshine Loan App Logo
         Box(
             modifier = Modifier
-                .size(96.dp)
+                .size(88.dp)
                 .clip(CircleShape)
                 .background(SunshineOrangeContainer)
                 .border(2.dp, SunshineOrangePrimary, CircleShape),
@@ -181,15 +204,15 @@ fun LoginScreen(
                 painter = painterResource(id = R.drawable.ic_sunshine_logo),
                 contentDescription = "Sunshine Loan Logo",
                 modifier = Modifier
-                    .size(72.dp)
+                    .size(68.dp)
                     .clip(CircleShape)
             )
         }
 
-        Spacer(modifier = Modifier.height(18.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
         Text(
-            text = "Sunshine Loan: VA Loan Calc",
+            text = "Sunshine Loan",
             fontSize = 24.sp,
             fontWeight = FontWeight.Bold,
             color = SunshineTextPrimary,
@@ -197,51 +220,13 @@ fun LoginScreen(
         )
 
         Text(
-            text = "Secure Mobile Verification",
+            text = "Instant Personal & Business Loans",
             fontSize = 14.sp,
             color = SunshineTextSecondary,
-            modifier = Modifier.padding(top = 4.dp, bottom = 28.dp)
+            modifier = Modifier.padding(top = 4.dp, bottom = 24.dp)
         )
 
-        // Firebase Configuration notice if google-services.json not found
-        if (!isConfigured) {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1)),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 20.dp)
-            ) {
-                Row(
-                    modifier = Modifier.padding(14.dp),
-                    verticalAlignment = Alignment.Top
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Info,
-                        contentDescription = "Configuration info",
-                        tint = SunshineOrangeDark,
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column {
-                        Text(
-                            text = "Firebase Config Notice",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
-                            color = SunshineTextPrimary
-                        )
-                        Text(
-                            text = "To enable live SMS OTP verification, add your google-services.json file at 'app/google-services.json'.",
-                            fontSize = 12.sp,
-                            color = SunshineTextSecondary,
-                            modifier = Modifier.padding(top = 2.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-        // Phone Input Card
+        // CARD 1: Mobile Number Input
         Card(
             colors = CardDefaults.cardColors(containerColor = SunshineWhite),
             shape = RoundedCornerShape(16.dp),
@@ -249,13 +234,48 @@ fun LoginScreen(
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
-                Text(
-                    text = "Enter Mobile Number",
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp,
-                    color = SunshineTextPrimary,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Mobile Number",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 15.sp,
+                        color = SunshineTextPrimary
+                    )
+
+                    if (isCodeSent) {
+                        TextButton(
+                            onClick = {
+                                storedVerificationId = null
+                                storedResendToken = null
+                                verifiedPhoneNumber = null
+                                otpCode = ""
+                                cooldownSeconds = 0
+                                localError = null
+                                viewModel.resetAuthState()
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = "Change Number",
+                                tint = SunshineOrangeDark,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Change",
+                                fontSize = 13.sp,
+                                color = SunshineOrangeDark,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -268,7 +288,9 @@ fun LoginScreen(
                                 .height(56.dp)
                                 .clip(RoundedCornerShape(10.dp))
                                 .border(1.dp, SunshineBorder, RoundedCornerShape(10.dp))
-                                .clickable { countryMenuExpanded = true }
+                                .clickable(enabled = !isCodeSent && !isLoading) {
+                                    countryMenuExpanded = true
+                                }
                                 .padding(horizontal = 12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -307,10 +329,13 @@ fun LoginScreen(
                     OutlinedTextField(
                         value = mobileNumber,
                         onValueChange = { input ->
-                            mobileNumber = input.filter { it.isDigit() }
-                            localError = null
+                            if (!isCodeSent) {
+                                mobileNumber = input.filter { it.isDigit() }
+                                localError = null
+                            }
                         },
-                        placeholder = { Text("Mobile number", color = SunshineTextHint) },
+                        enabled = !isCodeSent && !isLoading,
+                        placeholder = { Text("10-digit number", color = SunshineTextHint) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                         singleLine = true,
                         shape = RoundedCornerShape(10.dp),
@@ -333,147 +358,231 @@ fun LoginScreen(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                // If code not yet sent, show the Get OTP button
+                if (!isCodeSent) {
+                    Spacer(modifier = Modifier.height(16.dp))
 
-                // Get OTP Button
-                Button(
-                    onClick = {
-                        val formatResult = PhoneNumberUtil.format(selectedCountryCode, mobileNumber)
-                        if (formatResult.formattedNumber == null) {
-                            localError = formatResult.errorMessage
-                            return@Button
-                        }
-                        val targetActivity = activity ?: context.findActivity()
-                        if (targetActivity == null) {
-                            localError = "Cannot initiate verification: Activity context unavailable."
-                            return@Button
-                        }
-                        localError = null
-                        viewModel.sendOtp(formatResult.formattedNumber, targetActivity, resendToken)
-                    },
-                    enabled = mobileNumber.isNotBlank() && cooldownSeconds == 0 && !isLoading,
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = SunshineOrangePrimary,
-                        disabledContainerColor = SunshineOrangeContainer
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                        .testTag("get_otp_button")
-                ) {
-                    if (isLoading && !isCodeSent) {
-                        CircularProgressIndicator(
-                            color = SunshineWhite,
-                            modifier = Modifier.size(20.dp),
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Text(
-                            text = if (cooldownSeconds > 0) "Resend OTP in ${cooldownSeconds}s" else if (isCodeSent) "Resend OTP" else "Get OTP",
-                            color = if (cooldownSeconds > 0) SunshineTextSecondary else SunshineWhite,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp
-                        )
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // OTP Input Card (Shown after code is sent or available)
-        Card(
-            colors = CardDefaults.cardColors(containerColor = SunshineWhite),
-            shape = RoundedCornerShape(16.dp),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                Text(
-                    text = "Verification Code",
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp,
-                    color = SunshineTextPrimary,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
-
-                OutlinedTextField(
-                    value = otpCode,
-                    onValueChange = { input ->
-                        if (input.length <= 6) {
-                            otpCode = input.filter { it.isDigit() }
+                    Button(
+                        onClick = {
+                            val formatResult = PhoneNumberUtil.format(selectedCountryCode, mobileNumber)
+                            if (formatResult.formattedNumber == null) {
+                                localError = formatResult.errorMessage ?: "Please enter a valid mobile number."
+                                return@Button
+                            }
+                            val targetActivity = activity ?: context.findActivity()
+                            if (targetActivity == null) {
+                                localError = "Cannot initiate verification: Activity context unavailable."
+                                return@Button
+                            }
                             localError = null
+                            viewModel.sendOtp(formatResult.formattedNumber, targetActivity, null)
+                        },
+                        enabled = mobileNumber.isNotBlank() && !isLoading,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = SunshineOrangePrimary,
+                            disabledContainerColor = SunshineOrangeContainer
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("get_otp_button")
+                    ) {
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                color = SunshineWhite,
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Sending OTP...",
+                                color = SunshineWhite,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp
+                            )
+                        } else {
+                            Text(
+                                text = "Get OTP",
+                                color = SunshineWhite,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp
+                            )
                         }
-                    },
-                    placeholder = { Text("Enter 6-digit OTP", color = SunshineTextHint) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    singleLine = true,
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Default.Lock,
-                            contentDescription = null,
-                            tint = SunshineTextSecondary
-                        )
-                    },
-                    shape = RoundedCornerShape(10.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = SunshineOrangePrimary,
-                        unfocusedBorderColor = SunshineBorder,
-                        focusedContainerColor = SunshineWhite,
-                        unfocusedContainerColor = SunshineWhite
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("otp_code_input")
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Login Button
-                Button(
-                    onClick = {
-                        if (otpCode.length != 6) {
-                            localError = "Please enter the complete 6-digit OTP"
-                            return@Button
-                        }
-                        if (verificationId.isBlank()) {
-                            localError = "Please tap 'Get OTP' first to send a verification code to your phone."
-                            return@Button
-                        }
-                        localError = null
-                        viewModel.verifyOtp(verificationId, otpCode)
-                    },
-                    enabled = otpCode.length == 6 && !isLoading && verificationId.isNotBlank(),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = SunshineOrangePrimary,
-                        disabledContainerColor = SunshineOrangeContainer
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(50.dp)
-                        .testTag("login_button")
-                ) {
-                    if (isLoading && isCodeSent) {
-                        CircularProgressIndicator(
-                            color = SunshineWhite,
-                            modifier = Modifier.size(22.dp),
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Text(
-                            text = "Login",
-                            color = SunshineWhite,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp
-                        )
                     }
                 }
             }
         }
 
-        // Error message display
+        // CARD 2: OTP Verification Card (Revealed on Code Sent)
+        AnimatedVisibility(
+            visible = isCodeSent,
+            enter = fadeIn(),
+            exit = fadeOut()
+        ) {
+            Column {
+                Spacer(modifier = Modifier.height(18.dp))
+
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = SunshineWhite),
+                    shape = RoundedCornerShape(16.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Text(
+                            text = "Enter Verification Code",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 15.sp,
+                            color = SunshineTextPrimary
+                        )
+
+                        Text(
+                            text = "A 6-digit OTP has been sent via SMS to ${verifiedPhoneNumber ?: (selectedCountryCode + mobileNumber)}",
+                            fontSize = 13.sp,
+                            color = SunshineTextSecondary,
+                            modifier = Modifier.padding(top = 2.dp, bottom = 12.dp)
+                        )
+
+                        OutlinedTextField(
+                            value = otpCode,
+                            onValueChange = { input ->
+                                if (input.length <= 6) {
+                                    otpCode = input.filter { it.isDigit() }
+                                    localError = null
+                                }
+                            },
+                            placeholder = { Text("Enter 6-digit OTP", color = SunshineTextHint) },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true,
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.Lock,
+                                    contentDescription = null,
+                                    tint = SunshineTextSecondary
+                                )
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = SunshineOrangePrimary,
+                                unfocusedBorderColor = SunshineBorder,
+                                focusedContainerColor = SunshineWhite,
+                                unfocusedContainerColor = SunshineWhite
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("otp_code_input")
+                        )
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // 60-Second Resend Row
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (cooldownSeconds > 0) {
+                                Text(
+                                    text = "Resend OTP in ${cooldownSeconds}s",
+                                    fontSize = 13.sp,
+                                    color = SunshineTextSecondary,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            } else {
+                                Text(
+                                    text = "Didn't receive OTP?",
+                                    fontSize = 13.sp,
+                                    color = SunshineTextSecondary
+                                )
+                            }
+
+                            TextButton(
+                                onClick = {
+                                    val targetPhone = verifiedPhoneNumber ?: PhoneNumberUtil.format(selectedCountryCode, mobileNumber).formattedNumber
+                                    val targetActivity = activity ?: context.findActivity()
+                                    if (targetPhone != null && targetActivity != null) {
+                                        localError = null
+                                        cooldownSeconds = 60
+                                        timerTrigger += 1
+                                        viewModel.sendOtp(targetPhone, targetActivity, storedResendToken)
+                                    }
+                                },
+                                enabled = cooldownSeconds == 0 && !isLoading,
+                                modifier = Modifier.testTag("resend_otp_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Resend OTP",
+                                    tint = if (cooldownSeconds == 0 && !isLoading) SunshineOrangePrimary else SunshineTextHint,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Resend OTP",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = if (cooldownSeconds == 0 && !isLoading) SunshineOrangePrimary else SunshineTextHint
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // Login Button
+                        Button(
+                            onClick = {
+                                val currentVerificationId = storedVerificationId
+                                if (otpCode.length != 6) {
+                                    localError = "Please enter the complete 6-digit OTP code."
+                                    return@Button
+                                }
+                                if (currentVerificationId.isNullOrBlank()) {
+                                    localError = "Verification session not found. Please tap 'Resend OTP'."
+                                    return@Button
+                                }
+                                localError = null
+                                viewModel.verifyOtp(currentVerificationId, otpCode)
+                            },
+                            enabled = otpCode.length == 6 && !isLoading && !storedVerificationId.isNullOrBlank(),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = SunshineOrangePrimary,
+                                disabledContainerColor = SunshineOrangeContainer
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(50.dp)
+                                .testTag("login_button")
+                        ) {
+                            if (isLoading) {
+                                CircularProgressIndicator(
+                                    color = SunshineWhite,
+                                    modifier = Modifier.size(22.dp),
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Verifying OTP...",
+                                    color = SunshineWhite,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp
+                                )
+                            } else {
+                                Text(
+                                    text = "Login",
+                                    color = SunshineWhite,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Error message card
         val errorToShow = localError ?: (authState as? AuthState.Error)?.message
         if (!errorToShow.isNullOrBlank()) {
             Spacer(modifier = Modifier.height(16.dp))
@@ -482,29 +591,33 @@ fun LoginScreen(
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    Row(verticalAlignment = Alignment.Top) {
-                        Icon(
-                            imageVector = Icons.Default.Warning,
-                            contentDescription = "Error",
-                            tint = SunshineError,
-                            modifier = Modifier.size(20.dp).padding(top = 2.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = errorToShow,
-                            color = SunshineError,
-                            fontSize = 13.sp,
-                            lineHeight = 18.sp
-                        )
-                    }
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = "Error",
+                        tint = SunshineError,
+                        modifier = Modifier
+                            .size(20.dp)
+                            .padding(top = 2.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = errorToShow,
+                        color = SunshineError,
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp
+                    )
                 }
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Firebase Setup & SHA-1 Helper
+        // SHA-1 & Firebase Setup Guide Card (Always available, auto-expanded if SHA-1 error occurs)
+        val shouldExpandSha = showFirebaseDetails || isShaError
         Card(
             colors = CardDefaults.cardColors(containerColor = SunshineOrangeContainer),
             shape = RoundedCornerShape(12.dp),
@@ -527,27 +640,27 @@ fun LoginScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Firebase SHA-1 & Auth Setup Guide",
+                            text = "Firebase SHA-1 & Project Config",
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.sp,
                             color = SunshineOrangeDark
                         )
                     }
                     Text(
-                        text = if (showFirebaseDetails) "Hide" else "Show",
+                        text = if (shouldExpandSha) "Hide" else "Show",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = SunshineOrangeDark
                     )
                 }
 
-                if (showFirebaseDetails) {
+                if (shouldExpandSha) {
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = "For OTP delivery to succeed, Firebase requires your app's SHA-1 fingerprint in the Firebase Console:\n" +
-                               "1. Go to Firebase Console -> sunshine-loan-b8296\n" +
-                               "2. Project Settings -> Your Apps -> Android (com.sunshineloan.app)\n" +
-                               "3. Add the following SHA-1 fingerprint:",
+                        text = "For Firebase Phone OTP to work, your app's debug SHA-1 must be registered in the Firebase Console:\n" +
+                                "1. Open Firebase Console -> Project: sunshine-loan-b8296\n" +
+                                "2. Project Settings -> Your Apps -> Android (com.sunshineloan.app)\n" +
+                                "3. Click 'Add fingerprint' and paste the SHA-1 below:",
                         fontSize = 12.sp,
                         color = SunshineTextPrimary,
                         lineHeight = 16.sp
@@ -568,7 +681,7 @@ fun LoginScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "49:15:46:5B:C2:86:21:F7:0D:7B:98:80:64:18:EE:D4:1E:98:F3:4E",
+                                text = DEBUG_SHA1_FINGERPRINT,
                                 fontFamily = FontFamily.Monospace,
                                 fontSize = 11.sp,
                                 color = SunshineTextPrimary,
@@ -576,9 +689,7 @@ fun LoginScreen(
                             )
                             IconButton(
                                 onClick = {
-                                    clipboardManager.setText(
-                                        AnnotatedString("49:15:46:5B:C2:86:21:F7:0D:7B:98:80:64:18:EE:D4:1E:98:F3:4E")
-                                    )
+                                    clipboardManager.setText(AnnotatedString(DEBUG_SHA1_FINGERPRINT))
                                     shaCopiedNotice = true
                                 },
                                 modifier = Modifier.size(32.dp)
@@ -605,25 +716,12 @@ fun LoginScreen(
 
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Tip: In Firebase Console -> Authentication -> Sign-in method -> Phone, add a test phone number (e.g. +91 9999999999 with code 123456) for instant testing.",
+                        text = "Tip: In Firebase Console -> Authentication -> Sign-in method -> Phone, enable Phone provider. You can also register test phone numbers (e.g. +91 9999999999 with OTP 123456) for instant testing.",
                         fontSize = 11.sp,
                         color = SunshineTextSecondary,
                         lineHeight = 15.sp
                     )
                 }
-            }
-        }
-
-        // Development quick-access button if evaluating without live SMS credit
-        if (!viewModel.isFirebaseConfigured) {
-            Spacer(modifier = Modifier.height(20.dp))
-            OutlinedButton(
-                onClick = { onLoginSuccess() },
-                shape = RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = SunshineOrangeDark),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Continue to VA Loan Calculator (Demo Mode)", fontSize = 13.sp)
             }
         }
 

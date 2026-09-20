@@ -8,124 +8,128 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 
 /**
- * Utility for safely accessing Firebase services without crashing if google-services.json
- * is not yet supplied by the developer.
+ * Utility for safely and reliably initializing and accessing Firebase services for Sunshine Loan.
+ * Matches project configuration from app/google-services.json (sunshine-loan-b8296).
  */
 object FirebaseHelper {
 
     private const val TAG = "FirebaseHelper"
+
+    // Project credentials directly from app/google-services.json
+    const val FIREBASE_PROJECT_ID = "sunshine-loan-b8296"
+    const val FIREBASE_APPLICATION_ID = "1:753087265246:android:d248f97acdfaa37323c54f"
+    const val FIREBASE_API_KEY = "AIzaSyAfOKdUPRQcnp2UUT1e-Na9LV7IVEvaNIc"
+    const val FIREBASE_GCM_SENDER_ID = "753087265246"
+    const val FIREBASE_STORAGE_BUCKET = "sunshine-loan-b8296.firebasestorage.app"
 
     @Volatile
     private var lastInitException: Throwable? = null
 
     fun getLastInitException(): Throwable? = lastInitException
 
-    fun isConfigured(context: Context): Boolean {
+    @Synchronized
+    fun ensureInitialized(context: Context): Boolean {
         val appContext = context.applicationContext ?: context
-        return try {
-            if (FirebaseApp.getApps(appContext).isEmpty()) {
-                Log.d(TAG, "No default FirebaseApp found. Attempting FirebaseApp.initializeApp(appContext)...")
-                val app = FirebaseApp.initializeApp(appContext)
-                if (app == null) {
-                    Log.w(TAG, "FirebaseApp.initializeApp(appContext) returned null. Attempting explicit FirebaseOptions...")
-                    initializeWithOptions(appContext)
-                } else {
-                    Log.i(TAG, "Successfully initialized FirebaseApp: ${app.name}")
-                    lastInitException = null
-                }
+        try {
+            val existingApps = FirebaseApp.getApps(appContext)
+            if (existingApps.isNotEmpty()) {
+                lastInitException = null
+                return true
             }
-            val configured = FirebaseApp.getApps(appContext).isNotEmpty()
-            Log.d(TAG, "Firebase configured check: $configured (apps count: ${FirebaseApp.getApps(appContext).size})")
-            configured
+
+            // Attempt 1: Standard auto-initialization from google-services resources
+            Log.d(TAG, "Attempting standard FirebaseApp.initializeApp(appContext)...")
+            var app = try {
+                FirebaseApp.initializeApp(appContext)
+            } catch (e: Throwable) {
+                Log.w(TAG, "Standard FirebaseApp.initializeApp threw: ${e.message}", e)
+                null
+            }
+
+            // Attempt 2: Explicit FirebaseOptions using google-services credentials
+            if (app == null) {
+                Log.d(TAG, "Initializing FirebaseApp with explicit FirebaseOptions for project $FIREBASE_PROJECT_ID...")
+                val options = buildFirebaseOptions(appContext)
+                app = FirebaseApp.initializeApp(appContext, options)
+            }
+
+            if (app != null) {
+                Log.i(TAG, "FirebaseApp successfully initialized: ${app.name} (project: ${app.options.projectId})")
+                lastInitException = null
+                return true
+            } else {
+                val ex = IllegalStateException("FirebaseApp.initializeApp returned null.")
+                lastInitException = ex
+                Log.e(TAG, "Failed to initialize FirebaseApp.", ex)
+                return false
+            }
         } catch (e: Throwable) {
-            Log.e(TAG, "Error checking/initializing Firebase: ${e.message}", e)
+            Log.e(TAG, "Critical error during Firebase initialization: ${e.message}", e)
             lastInitException = e
-            // Fallback: try initializing explicitly with resources
-            try {
-                initializeWithOptions(appContext)
-                val configured = FirebaseApp.getApps(appContext).isNotEmpty()
-                Log.d(TAG, "Fallback initialization result: $configured")
-                configured
-            } catch (fallbackEx: Throwable) {
-                Log.e(TAG, "Fallback initialization also failed: ${fallbackEx.message}", fallbackEx)
-                lastInitException = fallbackEx
-                false
-            }
+            return false
         }
     }
 
-    private fun initializeWithOptions(context: Context) {
-        try {
-            // Read resources injected by google-services gradle plugin
-            val resources = context.resources
-            val packageName = context.packageName
+    private fun buildFirebaseOptions(context: Context): FirebaseOptions {
+        val resources = context.resources
+        val packageName = context.packageName
 
-            fun getResId(name: String, type: String): Int =
-                resources.getIdentifier(name, type, packageName)
-
-            val appIdRes = getResId("google_app_id", "string")
-            val apiKeyRes = getResId("google_api_key", "string")
-            val projectIdRes = getResId("project_id", "string")
-            val gcmSenderIdRes = getResId("gcm_defaultSenderId", "string")
-            val storageBucketRes = getResId("google_storage_bucket", "string")
-
-            if (appIdRes != 0 && apiKeyRes != 0) {
-                val appId = resources.getString(appIdRes)
-                val apiKey = resources.getString(apiKeyRes)
-                val projectId = if (projectIdRes != 0) resources.getString(projectIdRes) else "sunshine-loan-b8296"
-                val gcmSenderId = if (gcmSenderIdRes != 0) resources.getString(gcmSenderIdRes) else "753087265246"
-                val storageBucket = if (storageBucketRes != 0) resources.getString(storageBucketRes) else "sunshine-loan-b8296.firebasestorage.app"
-
-                val options = FirebaseOptions.Builder()
-                    .setApplicationId(appId)
-                    .setApiKey(apiKey)
-                    .setProjectId(projectId)
-                    .setGcmSenderId(gcmSenderId)
-                    .setStorageBucket(storageBucket)
-                    .build()
-
-                Log.d(TAG, "Initializing FirebaseApp with explicit FirebaseOptions (projectId=$projectId, appId=$appId)")
-                FirebaseApp.initializeApp(context, options)
-                lastInitException = null
-                Log.i(TAG, "Successfully initialized FirebaseApp with explicit FirebaseOptions.")
-            } else {
-                Log.e(TAG, "Cannot find google_app_id or google_api_key string resources in package $packageName")
-            }
-        } catch (e: Throwable) {
-            Log.e(TAG, "Exception in initializeWithOptions: ${e.message}", e)
-            lastInitException = e
-            throw e
+        fun getResString(name: String): String? {
+            val id = resources.getIdentifier(name, "string", packageName)
+            return if (id != 0) {
+                try {
+                    resources.getString(id)
+                } catch (_: Throwable) {
+                    null
+                }
+            } else null
         }
+
+        val appId = getResString("google_app_id") ?: FIREBASE_APPLICATION_ID
+        val apiKey = getResString("google_api_key") ?: FIREBASE_API_KEY
+        val projectId = getResString("project_id") ?: FIREBASE_PROJECT_ID
+        val gcmSenderId = getResString("gcm_defaultSenderId") ?: FIREBASE_GCM_SENDER_ID
+        val storageBucket = getResString("google_storage_bucket") ?: FIREBASE_STORAGE_BUCKET
+
+        return FirebaseOptions.Builder()
+            .setApplicationId(appId)
+            .setApiKey(apiKey)
+            .setProjectId(projectId)
+            .setGcmSenderId(gcmSenderId)
+            .setStorageBucket(storageBucket)
+            .build()
+    }
+
+    fun isConfigured(context: Context): Boolean {
+        return ensureInitialized(context)
     }
 
     fun getAuth(context: Context): FirebaseAuth? {
         val appContext = context.applicationContext ?: context
-        return try {
-            if (isConfigured(appContext)) {
+        return if (ensureInitialized(appContext)) {
+            try {
                 FirebaseAuth.getInstance()
-            } else {
-                Log.w(TAG, "getAuth called but Firebase is not configured.")
+            } catch (e: Throwable) {
+                Log.e(TAG, "FirebaseAuth.getInstance() failed: ${e.message}", e)
+                lastInitException = e
                 null
             }
-        } catch (e: Throwable) {
-            Log.e(TAG, "Error getting FirebaseAuth instance: ${e.message}", e)
-            lastInitException = e
+        } else {
             null
         }
     }
 
     fun getFirestore(context: Context): FirebaseFirestore? {
         val appContext = context.applicationContext ?: context
-        return try {
-            if (isConfigured(appContext)) {
+        return if (ensureInitialized(appContext)) {
+            try {
                 FirebaseFirestore.getInstance()
-            } else {
-                Log.w(TAG, "getFirestore called but Firebase is not configured.")
+            } catch (e: Throwable) {
+                Log.e(TAG, "FirebaseFirestore.getInstance() failed: ${e.message}", e)
+                lastInitException = e
                 null
             }
-        } catch (e: Throwable) {
-            Log.e(TAG, "Error getting FirebaseFirestore instance: ${e.message}", e)
-            lastInitException = e
+        } else {
             null
         }
     }
